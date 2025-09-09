@@ -1,3 +1,4 @@
 tensorflow>=2.10.0
 numpy
 Pillow
+flash==3.1.0
