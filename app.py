@@ -124,7 +124,12 @@
 # ................code 2................
 
 import os
+
+# -----------------------
+# Environment configuration
+# -----------------------
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TensorFlow logs
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Force CPU (no CUDA)
 
 from flask import Flask, render_template, request, jsonify
 import tensorflow as tf
@@ -133,6 +138,9 @@ import numpy as np
 from werkzeug.utils import secure_filename
 import cv2
 
+# -----------------------
+# Flask App Initialization
+# -----------------------
 app = Flask(__name__)
 
 # Configuration
@@ -146,11 +154,12 @@ app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # 5MB limit
 model = tf.keras.models.load_model('model/uniform_model.keras')
 CLASS_NAMES = ['non_uniform', 'uniform']  # 0 = non_uniform, 1 = uniform
 
-
+# -----------------------
+# Helper Functions
+# -----------------------
 def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
-
 
 def predict_image(img_path):
     try:
@@ -159,21 +168,18 @@ def predict_image(img_path):
         img_array = image.img_to_array(img) / 255.0
         img_array = np.expand_dims(img_array, axis=0)
 
-        # Get prediction
+        # Prediction
         prediction = model.predict(img_array)[0][0]
-
-        # Determine label
         label_idx = 1 if prediction > 0.5 else 0
         label = CLASS_NAMES[label_idx]
         confidence = prediction if label_idx == 1 else 1 - prediction
 
-        # Create a visualization
+        # Visualization
         img = cv2.imread(img_path)
         if img is not None:
             text = f"{label} ({confidence:.2%})"
             cv2.putText(img, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
                         0.7, (0, 255, 0), 2)
-
             processed_path = os.path.join(
                 app.config['UPLOAD_FOLDER'],
                 'processed_' + os.path.basename(img_path)
@@ -182,21 +188,18 @@ def predict_image(img_path):
         else:
             processed_path = img_path
 
-        return {
-            "label": label,
-            "confidence": round(confidence * 100, 2),
-            "processed_image": processed_path
-        }
+        return {"label": label, "confidence": round(confidence * 100, 2), "processed_image": processed_path}
 
     except Exception as e:
         print(f"Prediction error: {e}")
         return {"label": "Error", "confidence": 0, "error": str(e)}
 
-
+# -----------------------
+# Routes
+# -----------------------
 @app.route('/')
 def home():
     return render_template('index.html')
-
 
 @app.route('/process_image', methods=['POST'])
 def process_image_route():
@@ -213,7 +216,6 @@ def process_image_route():
         file.save(filepath)
 
         result = predict_image(filepath)
-
         if result.get('error'):
             return jsonify({"success": False, "error": result['error']})
 
@@ -221,7 +223,7 @@ def process_image_route():
             "success": True,
             "detections": [{
                 "class": result['label'],
-                "confidence": result['confidence'] / 100  # convert to 0-1
+                "confidence": result['confidence'] / 100
             }],
             "processed_image": f"/{result['processed_image']}"
         }
@@ -229,9 +231,13 @@ def process_image_route():
 
     return jsonify({"success": False, "error": "Invalid file type"})
 
-
-# Only run Flask's development server locally, not on deployment platforms
+# -----------------------
+# Run App
+# -----------------------
 if __name__ == "__main__":
+    # Get port from environment variable or default to 5000
+    port = int(os.getenv("PORT", 5000))
+    # Debug mode off by default; can enable locally with FLASK_DEBUG=True
     debug_mode = os.getenv("FLASK_DEBUG", "False").lower() == "true"
-    port = int(os.getenv("PORT", 5000))  # use platform's PORT if available
     app.run(host="0.0.0.0", port=port, debug=debug_mode)
+
