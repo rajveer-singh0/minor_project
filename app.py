@@ -379,33 +379,34 @@
 # code for streamlit 
 
 import os
+import io
 import numpy as np
 import tensorflow as tf
 import streamlit as st
-import cv2
-from tensorflow.keras.preprocessing import image
 from PIL import Image
-import io
+import cv2
 
 # -----------------------
 # Config
 # -----------------------
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TF logs
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Force CPU
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'   # Suppress TensorFlow logs
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Disable GPU (Streamlit Cloud doesn't support GPU)
 
 CLASS_NAMES = ['non_uniform', 'uniform']  # 0 = non_uniform, 1 = uniform
-MODEL_PATH = os.path.join("model", "uniform_model.keras")
+
+# Safe model path
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "model", "uniform_model.keras")
 
 # -----------------------
-# Load model (cached)
+# Load model with caching
 # -----------------------
 @st.cache_resource
 def load_model():
     try:
-        model = tf.keras.models.load_model(MODEL_PATH)
-        return model
+        return tf.keras.models.load_model(MODEL_PATH)
     except Exception as e:
-        st.error(f"❌ Model not found or incompatible: {e}")
+        st.error(f"❌ Model not found at `{MODEL_PATH}`. Error: {e}")
         st.stop()
 
 model = load_model()
@@ -415,20 +416,20 @@ model = load_model()
 # -----------------------
 def predict_image(file_bytes):
     try:
-        # Load image from bytes
+        # Load image
         pil_img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
         pil_img = pil_img.resize((128, 128))
-        img_array = image.img_to_array(pil_img) / 255.0
+        img_array = np.array(pil_img) / 255.0
         img_array = np.expand_dims(img_array, axis=0)
 
-        # Prediction
-        prediction = model.predict(img_array)[0][0]
+        # Predict
+        prediction = model.predict(img_array, verbose=0)[0][0]
         label_idx = 1 if prediction > 0.5 else 0
         label = CLASS_NAMES[label_idx]
         confidence = prediction if label_idx == 1 else 1 - prediction
 
-        # OpenCV visualization
-        cv_img = np.array(pil_img)[:, :, ::-1].copy()  # convert RGB→BGR for cv2
+        # Draw prediction on image
+        cv_img = np.array(pil_img)[:, :, ::-1].copy()  # RGB → BGR
         text = f"{label} ({confidence:.2%})"
         cv2.putText(cv_img, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
                     0.7, (0, 255, 0), 2)
@@ -436,11 +437,11 @@ def predict_image(file_bytes):
         return {
             "label": label,
             "confidence": round(confidence * 100, 2),
-            "processed_image": cv_img[:, :, ::-1]  # back to RGB for Streamlit
+            "processed_image": cv_img[:, :, ::-1]  # BGR → RGB
         }
 
     except Exception as e:
-        return {"label": "Error", "confidence": 0, "error": str(e)}
+        return {"error": str(e)}
 
 # -----------------------
 # Streamlit UI
@@ -449,7 +450,7 @@ st.set_page_config(page_title="Uniform Detection", layout="centered")
 st.title("👕 Uniform Detection System")
 st.markdown("Upload an image to check if a person is wearing a uniform or not.")
 
-uploaded_file = st.file_uploader("Upload an image (jpg / jpeg / png)", type=["jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader("📂 Upload an image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
     file_bytes = uploaded_file.read()
@@ -459,10 +460,10 @@ if uploaded_file is not None:
         result = predict_image(file_bytes)
 
         if "error" in result:
-            st.error(f"Prediction error: {result['error']}")
+            st.error(f"⚠️ Prediction error: {result['error']}")
         else:
-            st.success(f"Prediction: **{result['label']}** ({result['confidence']}% confidence)")
-            st.image(result["processed_image"], caption="Processed Image with Prediction", use_column_width=True)
+            st.success(f"✅ Prediction: **{result['label']}** ({result['confidence']}% confidence)")
+            st.image(result["processed_image"], caption="Processed Image", use_column_width=True)
             st.json({
                 "class": result["label"],
                 "confidence": result["confidence"] / 100
